@@ -282,16 +282,10 @@ def create_app(root=ROOT, data_dir=None):
         return web.json_response(run)
 
     async def artifact(request):
-        identifier = request.match_info["id"]
-        store.get(identifier)
-        directory = store.directory(identifier).resolve()
-        path = (directory / request.match_info["path"]).resolve()
-        if (
-            not path.is_relative_to(directory)
-            or path.suffix not in (".png", ".jpg", ".ndjson")
-            or not path.is_file()
-        ):
-            raise web.HTTPNotFound()
+        try:
+            path = store.artifact_path(request.match_info["id"], request.match_info["path"])
+        except ValueError as error:
+            raise web.HTTPNotFound() from error
         return web.FileResponse(path)
 
     async def index(request):
