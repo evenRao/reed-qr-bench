@@ -1,0 +1,10 @@
+{
+  "suite": "public-corpus",
+  "source": "image",
+  "implementations": ["plugin", "sdk", "opencv"],
+  "corpus_id": "zxing-subset",
+  "split": "held_out",
+  "repetitions": 3,
+  "seed": 42,
+  "warmups": 1
+}

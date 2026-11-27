@@ -1,0 +1,11 @@
+{
+  "suite": "calibration",
+  "source": "image",
+  "implementations": ["plugin", "sdk"],
+  "scenarios": ["clean"],
+  "repetitions": 10,
+  "operations": 100,
+  "seed": 42,
+  "warmups": 1,
+  "telemetry_profiles": ["minimal", "full"]
+}

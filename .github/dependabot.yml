@@ -1,0 +1,41 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directories: [/, /.github/actions/setup-python]
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Los_Angeles
+    open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns: ["*"]
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Los_Angeles
+    open-pull-requests-limit: 5
+    groups:
+      production-patch-minor:
+        dependency-type: production
+        update-types: [minor, patch]
+      development-patch-minor:
+        dependency-type: development
+        update-types: [minor, patch]
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Los_Angeles
+    open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: reed-qr-tools
+    groups:
+      python-patch-minor:
+        update-types: [minor, patch]

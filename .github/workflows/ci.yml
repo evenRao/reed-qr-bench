@@ -1,0 +1,258 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "release/**"]
+  pull_request:
+  merge_group:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  UV_CACHE_DIR: ${{ github.workspace }}/.cache/uv
+  UV_PYTHON_PREFERENCE: only-managed
+  REED_BENCH_RTC_TEST: "0"
+
+jobs:
+  code-security:
+    name: Code security
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    uses: ./.github/workflows/security.yml
+
+  quality:
+    name: Formatting, versions, and build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-python
+        with:
+          only-dev: "true"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Check versions and Python source
+        run: |
+          uv run --no-sync python scripts/version.py --check
+          uv run --no-sync python scripts/check-workflows.py
+          uv run --no-sync ruff check reed_bench packages/reed-qr-tools tests scripts
+          uv run --no-sync ruff format --check reed_bench packages/reed-qr-tools tests scripts
+      - name: Check and build browser source
+        run: |
+          npm ci --prefix web --no-audit --no-fund
+          npm --prefix web run format:check
+          npm --prefix web run build
+
+  backend:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          [
+            ubuntu-24.04,
+            ubuntu-26.04,
+            windows-2025,
+            macos-15-intel,
+            macos-15,
+            xcode-27,
+          ]
+        python: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-python
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Verify the published SDK and run backend tests
+        run: |
+          uv run --no-sync python scripts/verify-installed-sdk.py
+          uv run --no-sync python -m pytest -q --junitxml=reports/pytest.xml
+      - name: Save test results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tests-${{ matrix.os }}-py${{ matrix.python }}
+          path: reports/*.xml
+          if-no-files-found: ignore
+          retention-days: 14
+
+  browser:
+    name: Windows browser and local RTC
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-python
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Build browser UI
+        run: |
+          npm ci --prefix web --no-audit --no-fund
+          npm --prefix web run build
+      - name: Install checksum-verified local LiveKit
+        shell: pwsh
+        run: ./scripts/setup-livekit-demo.ps1
+      - name: Exercise real local RTC workloads
+        env:
+          REED_BENCH_RTC_TEST: "1"
+        run: uv run --no-sync python -m pytest tests/bench/test_livekit.py -q --junitxml=reports/rtc.xml
+      - name: Exercise browser workflows and synthetic camera
+        run: uv run --no-sync python scripts/browser-check.py
+      - name: Save browser and RTC diagnostics
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: browser-and-rtc
+          path: |
+            reports/
+            .cache/browser-qa/*.png
+          if-no-files-found: ignore
+          retention-days: 14
+
+  audit:
+    name: Dependency security / Python ${{ matrix.python }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-python
+        with:
+          only-dev: "true"
+          python-version: ${{ matrix.python }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+      - name: Export the full runtime dependency set
+        run: |
+          mkdir -p reports
+          uv export --locked --no-dev --extra voice --no-emit-project --no-emit-local --no-hashes --output-file reports/requirements-audit.txt
+      - name: Install browser dependencies for auditing
+        if: matrix.python == '3.14'
+        run: |
+          npm ci --prefix web --ignore-scripts --no-audit --no-fund
+      - name: Audit Python runtime dependencies
+        run: uvx --python '${{ matrix.python }}' --from pip-audit==2.10.1 pip-audit --disable-pip --no-deps --requirement reports/requirements-audit.txt --format json --output reports/python-audit.json
+      - name: Audit browser and build dependencies
+        if: ${{ !cancelled() && matrix.python == '3.14' }}
+        run: npm audit --prefix web --audit-level=high --json > reports/npm-audit.json
+      - name: Save audit results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dependency-audits-py${{ matrix.python }}
+          path: reports/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  package:
+    name: Verify release artifacts
+    needs: [quality, backend, browser, audit, code-security]
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-python
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Build the exact release files
+        run: |
+          npm ci --prefix web --no-audit --no-fund
+          npm --prefix web run build
+          uv run --no-sync python scripts/build-release.py
+      - name: Verify the tools wheel in a clean environment
+        shell: pwsh
+        run: |
+          uv venv .cache/wheel-check --python 3.14
+          if ($LASTEXITCODE -ne 0) { throw 'Could not create the artifact test environment.' }
+          $wheel = Get-ChildItem -LiteralPath dist -Filter '*.whl'
+          if ($wheel.Count -ne 1) { throw 'Expected one tools wheel.' }
+          uv pip install --python .cache/wheel-check/Scripts/python.exe --require-hashes -r dist/requirements-runtime.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Locked runtime installation failed.' }
+          uv pip install --python .cache/wheel-check/Scripts/python.exe --no-deps $wheel.FullName
+          if ($LASTEXITCODE -ne 0) { throw 'Tools wheel installation failed.' }
+          & .cache/wheel-check/Scripts/python.exe scripts/verify-installed-sdk.py
+          if ($LASTEXITCODE -ne 0) { throw 'Installed artifact verification failed.' }
+      - name: Run the packaged application in the clean environment
+        shell: pwsh
+        run: |
+          $projectRoot = (Get-Location).Path
+          $python = Join-Path $projectRoot '.cache/wheel-check/Scripts/python.exe'
+          $version = (Get-Content -LiteralPath VERSION -Raw).Trim()
+          $archive = Join-Path $projectRoot "dist/reed-qr-bench-$version-windows.zip"
+          $extracted = Join-Path $projectRoot '.cache/bundle-check'
+          Expand-Archive -LiteralPath $archive -DestinationPath $extracted
+          Push-Location (Join-Path $extracted "reed-qr-bench-$version")
+          try {
+              $output = & $python -m reed_bench --data-dir .cache/smoke --run protocols/smoke.json | Out-String
+              if ($LASTEXITCODE -ne 0) { throw 'Packaged application smoke check failed.' }
+              $smoke = $output | ConvertFrom-Json
+              if ($smoke.status -ne 'completed') { throw 'Packaged application run did not complete.' }
+              $correct = ($smoke.summary | Measure-Object -Property correct -Sum).Sum
+              if ($correct -ne 12) { throw "Expected 12 correct packaged attempts, got $correct." }
+          } finally {
+              Pop-Location
+          }
+      - name: Save verified release files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-files
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  passed:
+    name: CI passed
+    if: ${{ always() }}
+    needs: [quality, backend, browser, audit, code-security, package]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every job to succeed
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          results = json.loads(os.environ['RESULTS'])
+          failures = {name: item['result'] for name, item in results.items() if item['result'] != 'success'}
+          if failures:
+              raise SystemExit(f'CI did not pass: {failures}')
+          PY

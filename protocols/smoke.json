@@ -1,0 +1,10 @@
+{
+  "suite": "smoke",
+  "source": "image",
+  "implementations": ["plugin", "sdk", "opencv"],
+  "scenarios": ["clean", "no_code"],
+  "repetitions": 2,
+  "seed": 42,
+  "warmups": 1,
+  "targets": { "min_accuracy": 1, "max_false_detections": 0 }
+}

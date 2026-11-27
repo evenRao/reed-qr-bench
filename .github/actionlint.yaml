@@ -1,0 +1,3 @@
+# GitHub-hosted labels documented by actions/runner-images but not yet in actionlint 1.7.12.
+self-hosted-runner:
+  labels: [ubuntu-26.04, xcode-27]

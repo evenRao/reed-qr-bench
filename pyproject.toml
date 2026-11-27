@@ -1,0 +1,44 @@
+[project]
+name = "reed-qr-bench"
+version = "0.2.0"
+description = "Instrumented REED QR demonstrations and reproducible benchmark evidence"
+readme = "README.md"
+requires-python = ">=3.11,<3.15"
+license = "Apache-2.0"
+dependencies = [
+    "reed-qr[livekit]==0.1.0",
+    "reed-qr-tools==0.2.0",
+    "livekit-api>=1.1,<2",
+    "aiohttp>=3.10,<4",
+    "pillow>=13,<14",
+    "psutil>=7,<8",
+    "segno>=1.6,<2",
+    "opencv-python-headless>=4.12,<5",
+    "python-dotenv>=1,<2",
+]
+
+[project.optional-dependencies]
+voice = [
+    "livekit-agents==1.8.9",
+    "python-dotenv>=1,<2",
+]
+
+[dependency-groups]
+dev = ["pytest>=8,<10", "ruff>=0.14,<1"]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+reed-qr-tools = { path = "packages/reed-qr-tools" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests/bench"]
+pythonpath = [".", "packages/reed-qr-tools/src"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
