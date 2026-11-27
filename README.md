@@ -112,3 +112,9 @@ Store credentials in the ignored `.env` file, using `.env.example` as a template
 Runs and uploads live under `.cache/bench-v2`; older data stays in its original
 directory. Local data, environments, dependencies, and browser build output are
 excluded by `.gitignore`. Export reports before deleting any saved run data.
+
+## License
+
+REED QR Bench and `reed-qr-tools` use the [MIT License](LICENSE).
+Third-party components retain their own licenses; see
+[third-party notices](THIRD_PARTY_NOTICES.md).

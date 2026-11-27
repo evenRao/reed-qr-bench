@@ -34,3 +34,8 @@ an `EncodedQR` and returns an opaque, authorized artifact ID. Calls to
 return that ID and dimensions; PNG bytes remain in host-owned storage. The host
 owns artifact lifetime and authorization. Without a publisher, encoding is not
 advertised as a model tool and model encoding calls are rejected.
+
+## License
+
+This package uses the [MIT License](LICENSE). The REED QR SDK dependency and its
+third-party components retain their respective licenses and notices.

@@ -33,6 +33,7 @@ ROOT_FILES = (
 )
 SOURCE_DIRS = (
     ".github",
+    "licenses",
     "reed_bench",
     "packages/reed-qr-tools",
     "protocols",
@@ -151,8 +152,11 @@ def verify_directory(output, version):
         metadata = email.parser.Parser().parsestr(wheel.read(metadata_path).decode())
         if metadata["Name"] != "reed-qr-tools" or metadata["Version"] != version:
             raise ValueError("Tools wheel metadata differs from VERSION")
-        if not any(name.endswith("/licenses/LICENSE") for name in wheel.namelist()):
-            raise ValueError("Tools wheel is missing its license")
+        if metadata["License-Expression"] != "MIT":
+            raise ValueError("Tools wheel must declare the MIT license")
+        license_path = f"reed_qr_tools-{version}.dist-info/licenses/LICENSE"
+        if wheel.read(license_path) != (ROOT / "packages/reed-qr-tools/LICENSE").read_bytes():
+            raise ValueError("Tools wheel license differs from the project license")
     with tarfile.open(output / f"reed_qr_tools-{version}.tar.gz") as archive:
         names = set(archive.getnames())
         prefix = f"reed_qr_tools-{version}/"

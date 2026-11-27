@@ -1,5 +1,10 @@
 # Third-party dependency notices
 
+REED QR Bench and `reed-qr-tools` project code use the [MIT License](LICENSE).
+This does not change the licenses of third-party components. The previously
+included rxing Apache license and attribution are retained at
+[licenses/rxing/LICENSE](licenses/rxing/LICENSE).
+
 REED QR Bench and its SDK dependency use third-party libraries under their
 respective licenses. The locked manifests record dependency versions. This
 inventory does not replace the required license texts or a transitive license audit.
