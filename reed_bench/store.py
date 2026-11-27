@@ -6,8 +6,10 @@ import html
 import io
 import json
 import os
+import re
 import secrets
 import sqlite3
+import stat
 import time
 import zipfile
 from pathlib import Path
@@ -15,7 +17,7 @@ from pathlib import Path
 
 class Store:
     def __init__(self, root):
-        self.root = Path(root)
+        self.root = Path(root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self.owner = (self.root / ".owner.lock").open("a+b")
         if self.owner.seek(0, 2) == 0:
@@ -46,15 +48,41 @@ class Store:
         self.exports = []
 
     def directory(self, identifier):
-        if (
-            not isinstance(identifier, str)
-            or len(identifier) != 24
-            or any(c not in "0123456789abcdef" for c in identifier)
-        ):
+        if not isinstance(identifier, str) or re.fullmatch(r"[0-9a-f]{24}", identifier) is None:
             raise ValueError("Unknown run")
-        directory = self.root / identifier
+        directory = self._contained_path(self.root / identifier, self.root)
+        if directory != self.root / identifier:
+            raise ValueError("Run directories must not be linked")
         directory.mkdir(exist_ok=True)
         return directory
+
+    @staticmethod
+    def _contained_path(path, root):
+        # Resolve links before checking a separator-terminated prefix, so a sibling
+        # such as runs-private cannot pass a check for runs. This normalization and
+        # boundary check also make the filesystem trust boundary explicit to CodeQL.
+        candidate = os.path.realpath(path)
+        prefix = os.path.join(os.path.realpath(root), "")
+        if not candidate.startswith(prefix):
+            raise ValueError("Evidence path escapes its directory")
+        return Path(candidate)
+
+    def _evidence_files(self, directory):
+        pending = [directory]
+        while pending:
+            with os.scandir(pending.pop()) as entries:
+                for entry in entries:
+                    metadata = entry.stat(follow_symlinks=False)
+                    reparse_point = os.name == "nt" and (
+                        metadata.st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT
+                    )
+                    if entry.is_symlink() or reparse_point:
+                        raise ValueError("Evidence must not contain linked files or directories")
+                    path = self._contained_path(entry.path, directory)
+                    if entry.is_dir(follow_symlinks=False):
+                        pending.append(path)
+                    elif entry.is_file(follow_symlinks=False):
+                        yield path
 
     def save(self, run):
         text = json.dumps(run, ensure_ascii=True, indent=2)
@@ -108,26 +136,40 @@ class Store:
     def evidence_zip(self, identifier):
         return self.evidence_path(identifier).read_bytes()
 
+    def artifact_path(self, identifier, relative):
+        self.get(identifier)
+        directory = self.directory(identifier)
+        path = self._contained_path(directory / relative, directory)
+        if path.suffix not in (".png", ".jpg", ".ndjson") or not path.is_file():
+            raise ValueError("Unknown artifact")
+        return path
+
     def evidence_path(self, identifier):
         self.get(identifier)
         directory = self.directory(identifier)
-        export_root = self.root / "exports"
+        export_root = self._contained_path(self.root / "exports", self.root)
+        if export_root != self.root / "exports":
+            raise ValueError("Export directory must not be linked")
         export_root.mkdir(exist_ok=True)
         target = export_root / (secrets.token_hex(16) + ".zip")
-        with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as bundle:
-            manifest = {}
-            for path in directory.rglob("*"):
-                if (
-                    not path.is_file()
-                    or path.suffix == ".pending"
-                    or path.name.endswith(".stderr.log")
-                ):
-                    continue
-                relative = path.relative_to(directory).as_posix()
-                bundle.write(path, relative)
-                with path.open("rb") as source:
-                    manifest[relative] = hashlib.file_digest(source, "sha256").hexdigest()
-            bundle.writestr("SHA256.json", json.dumps(manifest, indent=2))
+        destination = target.open("xb")
+        try:
+            with destination, zipfile.ZipFile(destination, "w", zipfile.ZIP_DEFLATED) as bundle:
+                manifest = {}
+                for path in self._evidence_files(directory):
+                    if path.suffix == ".pending" or path.name.endswith(".stderr.log"):
+                        continue
+                    relative = path.relative_to(directory).as_posix()
+                    checksum = hashlib.sha256()
+                    with path.open("rb") as source, bundle.open(relative, "w") as output:
+                        while chunk := source.read(1024 * 1024):
+                            output.write(chunk)
+                            checksum.update(chunk)
+                    manifest[relative] = checksum.hexdigest()
+                bundle.writestr("SHA256.json", json.dumps(manifest, indent=2))
+        except BaseException:
+            target.unlink(missing_ok=True)
+            raise
         self.exports.append(target)
         while len(self.exports) > 10:
             previous = self.exports.pop(0)

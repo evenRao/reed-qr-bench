@@ -78,13 +78,23 @@ Verified November 25, 2026:
 | Release artifacts | ZIP, wheel/sdist, licenses, SBOMs, and checksums verified; clean hash-locked install passed; extracted application completed 12 correct smoke attempts |
 | Browser workflow | Passed: image decode, independent encoding check, 12-attempt experiment, report inspection/export links, keyboard modal handling, unsupported-payload display, and mobile overflow check |
 
+The November 27 path-security update passed 52 backend tests, with three skips:
+the opt-in RTC test and two file-symlink cases requiring Windows symlink privileges.
+Real Windows directory-junction tests passed. These cover run/export directory
+escapes, sibling-prefix collisions, nested linked directories, cross-run artifact
+access, archive checksums, and cleanup of failed exports. Evidence export rejects
+symlinks and directory junctions instead of following them. Filesystem paths are
+canonicalized and checked against a separator-terminated directory boundary.
+The CodeQL alert still needs a scan of the updated revision on GitHub; the local
+checks do not establish that GitHub has closed it.
+
 Local RTC integration could not run because an existing LiveKit service occupied
 port 7880. Browser RTC metrics and synthetic-camera checks were explicitly skipped.
 The existing service was left running. The last full RTC check passed on
 November 23; that result does not constitute a fresh RTC verification. The current
 clean installation uses the published REED QR 0.1.0 SDK and reed-qr-tools 0.2.0 wheel.
-GitHub-hosted matrix jobs, CodeQL uploads, attestations, and release publication
-still need their first run after repository upload.
+Check GitHub-hosted matrix jobs, CodeQL results, attestations, and release
+publication against the exact revision being released.
 
 The RTC test executes 13 real attempts: plugin/direct SDK/OpenCV/scanning-disabled
 over positive and no-code video with track replacement, four streams with two
