@@ -19,7 +19,7 @@ dependencies = [
 
 [project.optional-dependencies]
 voice = [
-    "livekit-agents==1.8.9",
+    "livekit-agents==1.8.13",
     "python-dotenv>=1,<2",
 ]
 
