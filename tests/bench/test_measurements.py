@@ -1,4 +1,5 @@
 import asyncio
+import time
 
 import pytest
 
@@ -36,26 +37,43 @@ def test_no_data_is_not_zero_and_config_is_bounded():
 
 def test_latest_frame_replacement_and_retired_results():
     async def scenario():
+        started = asyncio.Event()
         gate = asyncio.Event()
+        completed = asyncio.Event()
+        events = []
 
         class Decoder:
             async def frame(self, frame, source, generation):
+                started.set()
                 await gate.wait()
                 return {"detections": [{"text": "old"}]}
 
-        events = []
-        pipeline = FramePipeline(Decoder(), lambda *args: events.append(args), scan_hz=10000)
-        pipeline.activate("camera", 1)
-        pipeline.offer("camera", 1, object())
-        await asyncio.sleep(0.001)
-        pipeline.offer("camera", 1, object())
-        await asyncio.sleep(0.001)
-        pipeline.offer("camera", 1, object())
-        pipeline.retire("camera")
-        pipeline.activate("camera", 2)
-        gate.set()
-        await asyncio.sleep(0.01)
-        await pipeline.close()
+        def emit(kind, detail):
+            events.append((kind, detail))
+            if kind == "frame_completed":
+                completed.set()
+
+        pipeline = FramePipeline(Decoder(), emit, scan_hz=10000)
+
+        try:
+            async with asyncio.timeout(5):
+                pipeline.activate("camera", 1)
+                received = time.perf_counter()
+
+                pipeline.offer("camera", 1, object(), received=received)
+                await started.wait()
+
+                pipeline.offer("camera", 1, object(), received=received + 0.001)
+                pipeline.offer("camera", 1, object(), received=received + 0.002)
+
+                pipeline.retire("camera")
+                pipeline.activate("camera", 2)
+                gate.set()
+                await completed.wait()
+        finally:
+            gate.set()
+            await pipeline.close()
+
         assert pipeline.meter.counts["replaced"] == 1
         assert pipeline.meter.counts["late_rejected"] == 1
         completions = [detail for kind, detail in events if kind == "frame_completed"]
